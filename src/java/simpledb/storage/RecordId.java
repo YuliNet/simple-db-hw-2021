@@ -2,6 +2,9 @@ package simpledb.storage;
 
 import java.io.Serializable;
 
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+
 /**
  * A RecordId is a reference to a specific tuple on a specific page of a
  * specific table.
@@ -9,6 +12,9 @@ import java.io.Serializable;
 public class RecordId implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private PageId pageId;
+    private int tupleNumber;
 
     /**
      * Creates a new RecordId referring to the specified PageId and tuple
@@ -21,6 +27,8 @@ public class RecordId implements Serializable {
      */
     public RecordId(PageId pid, int tupleno) {
         // some code goes here
+        this.pageId = pid;
+        this.tupleNumber = tupleno;
     }
 
     /**
@@ -28,7 +36,7 @@ public class RecordId implements Serializable {
      */
     public int getTupleNumber() {
         // some code goes here
-        return 0;
+        return tupleNumber;
     }
 
     /**
@@ -36,7 +44,7 @@ public class RecordId implements Serializable {
      */
     public PageId getPageId() {
         // some code goes here
-        return null;
+        return pageId;
     }
 
     /**
@@ -48,7 +56,14 @@ public class RecordId implements Serializable {
     @Override
     public boolean equals(Object o) {
         // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        if (o == this)
+            return true;
+        if (o == null || o.getClass() != getClass())
+            return false;
+        RecordId obj = (RecordId) o;
+        return new EqualsBuilder().append(pageId, obj.getPageId())
+                                  .append(tupleNumber, obj.getTupleNumber())
+                                  .isEquals();
     }
 
     /**
@@ -60,8 +75,9 @@ public class RecordId implements Serializable {
     @Override
     public int hashCode() {
         // some code goes here
-        throw new UnsupportedOperationException("implement this");
-
+        return new HashCodeBuilder(17, 37).append(pageId)
+                                          .append(tupleNumber)
+                                          .toHashCode();
     }
 
 }

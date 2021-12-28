@@ -8,8 +8,10 @@ import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-import java.util.concurrent.ConcurrentHashMap;
+import org.apache.commons.lang3.tuple.Pair;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -27,6 +29,10 @@ public class BufferPool {
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
     private static int pageSize = DEFAULT_PAGE_SIZE;
+
+    private int numPages;
+
+    private Map<PageId, Pair<Page, Permissions>> LRUCache;
     
     /** Default number of pages passed to the constructor. This is used by
     other classes. BufferPool should use the numPages argument to the
@@ -40,6 +46,13 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         // some code goes here
+        this.numPages = numPages;
+        this.LRUCache = new LinkedHashMap<PageId, Pair<Page, Permissions>>(numPages, 0.75F, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<PageId, Pair<Page, Permissions>> eldest) {
+                return size() > numPages;
+            }
+        };
     }
     
     public static int getPageSize() {
@@ -71,10 +84,25 @@ public class BufferPool {
      * @param pid the ID of the requested page
      * @param perm the requested permissions on the page
      */
-    public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
+    public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
-        return null;
+        if (pid.getPageNumber() > numPages)
+            throw new DbException("pid is over limit size, please check the validate of the pid");
+        if (LRUCache.containsKey(pid)) {
+            // Page page = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
+            // Pair<Page, Permissions> pair = Pair.of(page, perm);
+            // LRUCache.put(pid, pair);
+            Pair<Page, Permissions> pair = LRUCache.get(pid);
+            // 在这里做权限校验，如果事务权限小于给定page的权限，则抛出异常
+            if (perm.ordinal() < pair.getRight().ordinal())
+                throw new TransactionAbortedException();
+            return pair.getLeft();
+        }
+        // 实现LRU替换策略，从当前Database下，所有表的目录中，获取表的dbfile，根据pid获取dbfile中的page到LRU缓存中来
+        Pair<Page, Permissions> newPair = Pair.of(Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid), perm);
+        LRUCache.put(pid, newPair);
+        return newPair.getLeft();
     }
 
     /**
@@ -86,7 +114,7 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      * @param pid the ID of the page to unlock
      */
-    public  void unsafeReleasePage(TransactionId tid, PageId pid) {
+    public void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
     }

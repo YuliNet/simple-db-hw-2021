@@ -5,11 +5,14 @@ import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 import simpledb.common.Type;
 import simpledb.common.DbException;
+import simpledb.storage.DbFile;
 import simpledb.storage.DbFileIterator;
 import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
+import simpledb.storage.TupleDesc.TDItem;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * SeqScan is an implementation of a sequential scan access method that reads
@@ -19,6 +22,10 @@ import java.util.*;
 public class SeqScan implements OpIterator {
 
     private static final long serialVersionUID = 1L;
+    private DbFileIterator it;
+    private final TransactionId tid;
+    private int tableId;
+    private String tableAlias;
 
     /**
      * Creates a sequential scan over the specified table as a part of the
@@ -36,8 +43,12 @@ public class SeqScan implements OpIterator {
      *            are, but the resulting name can be null.fieldName,
      *            tableAlias.null, or null.null).
      */
-    public SeqScan(TransactionId tid, int tableid, String tableAlias) {
+    public SeqScan(TransactionId tid, int tableId, String tableAlias) {
         // some code goes here
+        this.tid = tid;
+        this.tableId = tableId;
+        this.tableAlias = tableAlias;
+        this.it = null;
     }
 
     /**
@@ -46,7 +57,7 @@ public class SeqScan implements OpIterator {
      *       be the actual name of the table in the catalog of the database
      * */
     public String getTableName() {
-        return null;
+        return Database.getCatalog().getTableName(tableId);
     }
 
     /**
@@ -55,7 +66,7 @@ public class SeqScan implements OpIterator {
     public String getAlias()
     {
         // some code goes here
-        return null;
+        return tableAlias;
     }
 
     /**
@@ -70,8 +81,10 @@ public class SeqScan implements OpIterator {
      *            are, but the resulting name can be null.fieldName,
      *            tableAlias.null, or null.null).
      */
-    public void reset(int tableid, String tableAlias) {
+    public void reset(int tableId, String tableAlias) {
         // some code goes here
+        this.tableId = tableId;
+        this.tableAlias = tableAlias;
     }
 
     public SeqScan(TransactionId tid, int tableId) {
@@ -80,6 +93,8 @@ public class SeqScan implements OpIterator {
 
     public void open() throws DbException, TransactionAbortedException {
         // some code goes here
+        it = Database.getCatalog().getDatabaseFile(tableId).iterator(tid);
+        it.open();
     }
 
     /**
@@ -94,26 +109,47 @@ public class SeqScan implements OpIterator {
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return null;
+        TupleDesc tupleDesc = Database.getCatalog().getTupleDesc(tableId);
+        if (tableAlias != null || !tableAlias.equals("")) {
+            Map<String, Integer> nameToIdxMap = new HashMap<>();
+            List<TDItem> newItems = new ArrayList<>();
+            List<TDItem> oldItems = tupleDesc.tdItems();
+            for (int i = 0; i < oldItems.size(); i ++) {
+                nameToIdxMap.put(tableAlias + "." + oldItems.get(i).fieldName, i);
+                newItems.add(new TDItem(oldItems.get(i).getFieldType(), tableAlias +"." + oldItems.get(i).getFieldName()));
+            }
+            return new TupleDesc(newItems, nameToIdxMap);
+        }
+        return tupleDesc;
     }
 
     public boolean hasNext() throws TransactionAbortedException, DbException {
         // some code goes here
-        return false;
+        if (it == null)
+            return false;
+        return it.hasNext();
     }
 
     public Tuple next() throws NoSuchElementException,
             TransactionAbortedException, DbException {
         // some code goes here
-        return null;
+        if (it == null)
+                throw new DbException("iterator is already closed, please check the validate");
+        Tuple tuple = it.next();
+        if (tuple == null)
+                throw new NoSuchElementException(String.format("no such element, witch table id is : %s"));
+        return tuple;
     }
 
     public void close() {
         // some code goes here
+        it.close();
+        it = null;
     }
 
     public void rewind() throws DbException, NoSuchElementException,
             TransactionAbortedException {
         // some code goes here
+        it.rewind();
     }
 }

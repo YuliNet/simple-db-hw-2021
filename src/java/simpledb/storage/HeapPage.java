@@ -7,6 +7,9 @@ import simpledb.common.Catalog;
 import simpledb.transaction.TransactionId;
 
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.io.*;
 
 /**
@@ -54,7 +57,6 @@ public class HeapPage implements Page {
         header = new byte[getHeaderSize()];
         for (int i=0; i<header.length; i++)
             header[i] = dis.readByte();
-        
         tuples = new Tuple[numSlots];
         try{
             // allocate and read the actual records of this page
@@ -71,21 +73,18 @@ public class HeapPage implements Page {
     /** Retrieve the number of tuples on this page.
         @return the number of tuples on this page
     */
-    private int getNumTuples() {        
+    private int getNumTuples() {
         // some code goes here
-        return 0;
-
+        return (int) Math.floor((BufferPool.getPageSize() * 1.0 * 8.0) / ((td.getSize() * 8.0 * 1.0) + 1.0));
     }
 
     /**
      * Computes the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
-    private int getHeaderSize() {        
-        
+    private int getHeaderSize() {
         // some code goes here
-        return 0;
-                 
+        return (int) Math.ceil(getNumTuples() * 1.0 / 8.0);
     }
     
     /** Return a view of this page before it was modified
@@ -117,8 +116,8 @@ public class HeapPage implements Page {
      * @return the PageId associated with this page.
      */
     public HeapPageId getId() {
-    // some code goes here
-    throw new UnsupportedOperationException("implement this");
+        // some code goes here
+        return pid;
     }
 
     /**
@@ -288,7 +287,11 @@ public class HeapPage implements Page {
      */
     public int getNumEmptySlots() {
         // some code goes here
-        return 0;
+        int usedSlotsNum = (int) IntStream.range(0, numSlots)
+                                          .filter(this::isSlotUsed)
+                                          .summaryStatistics()
+                                          .getCount();
+        return numSlots - usedSlotsNum;
     }
 
     /**
@@ -296,7 +299,7 @@ public class HeapPage implements Page {
      */
     public boolean isSlotUsed(int i) {
         // some code goes here
-        return false;
+        return ((header[(i >> 3)] >> (i % 8)) & 1) == 1;
     }
 
     /**
@@ -313,8 +316,11 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // some code goes here
-        return null;
+        return IntStream.range(0, numSlots)
+                        .filter(this::isSlotUsed)
+                        .mapToObj(index -> tuples[index])
+                        .collect(Collectors.toList())
+                        .iterator();
     }
-
 }
 

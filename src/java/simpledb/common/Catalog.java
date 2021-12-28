@@ -1,6 +1,5 @@
 package simpledb.common;
 
-import simpledb.common.Type;
 import simpledb.storage.DbFile;
 import simpledb.storage.HeapFile;
 import simpledb.storage.TupleDesc;
@@ -11,6 +10,8 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.apache.commons.lang3.builder.ToStringBuilder;
 
 /**
  * The Catalog keeps track of all available tables in the database and their
@@ -23,12 +24,39 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class Catalog {
 
+    private static class Table {
+        public final DbFile dbFile;
+        public final String name;
+        public final String pkeyField;
+
+        public Table(DbFile dbFile, String name, String pkeyField) {
+            this.dbFile = dbFile;
+            this.name = name;
+            this.pkeyField = pkeyField;
+        }
+
+        @Override
+        public String toString() {
+            return new ToStringBuilder(this).append(dbFile)
+                                            .append(name)
+                                            .append(pkeyField)
+                                            .toString();
+        }
+    }
+
+    private List<Integer> tableList;
+    private Map<Integer, Table> tableCache;
+    private Map<String, Table> nameTransferToTableCache;
+
     /**
      * Constructor.
      * Creates a new, empty catalog.
      */
     public Catalog() {
         // some code goes here
+        this.tableCache = new ConcurrentHashMap<>();
+        this.nameTransferToTableCache = new ConcurrentHashMap<>();
+        this.tableList = new LinkedList<>();
     }
 
     /**
@@ -42,6 +70,24 @@ public class Catalog {
      */
     public void addTable(DbFile file, String name, String pkeyField) {
         // some code goes here
+        Table table = new Table(file, name, pkeyField);
+        if (!tableList.isEmpty() && tableList.contains(file.getId()))
+            tableList.remove((Integer) file.getId());
+        if (tableCache.containsKey(file.getId())) {
+            Table deleteTable = tableCache.get(file.getId());
+            if (nameTransferToTableCache.containsKey(deleteTable.name))
+                nameTransferToTableCache.remove(deleteTable.name);
+            tableCache.remove(file.getId());
+        }
+        if (nameTransferToTableCache.containsKey(name)) {
+            Table deleteTable = nameTransferToTableCache.get(name);
+            if (tableCache.containsKey(deleteTable.dbFile.getId()))
+                tableCache.remove(deleteTable.dbFile.getId());
+            nameTransferToTableCache.remove(name);
+        }
+        tableList.add(file.getId());
+        tableCache.put(file.getId(), table);
+        nameTransferToTableCache.put(name, table);
     }
 
     public void addTable(DbFile file, String name) {
@@ -65,7 +111,9 @@ public class Catalog {
      */
     public int getTableId(String name) throws NoSuchElementException {
         // some code goes here
-        return 0;
+        if (name != null && nameTransferToTableCache.containsKey(name))
+            return nameTransferToTableCache.get(name).dbFile.getId();
+        throw new NoSuchElementException(String.format("can not find the table id by name, witch is {}", name));
     }
 
     /**
@@ -76,7 +124,9 @@ public class Catalog {
      */
     public TupleDesc getTupleDesc(int tableid) throws NoSuchElementException {
         // some code goes here
-        return null;
+        if (!tableCache.containsKey(tableid))
+            throw new NoSuchElementException(String.format("can not find the table by table id, witch is {}", tableid));
+        return tableCache.get(tableid).dbFile.getTupleDesc();
     }
 
     /**
@@ -87,27 +137,31 @@ public class Catalog {
      */
     public DbFile getDatabaseFile(int tableid) throws NoSuchElementException {
         // some code goes here
-        return null;
+        if (!tableCache.containsKey(tableid))
+            throw new NoSuchElementException(String.format("can not find this table by table id witch is {}", tableid));
+        return tableCache.get(tableid).dbFile;
     }
 
     public String getPrimaryKey(int tableid) {
         // some code goes here
-        return null;
+        return tableCache.get(tableid).pkeyField;
     }
 
     public Iterator<Integer> tableIdIterator() {
         // some code goes here
-        return null;
+        return tableList.iterator();
     }
 
     public String getTableName(int id) {
         // some code goes here
-        return null;
+        return tableCache.get(id).name;
     }
     
     /** Delete all tables from the catalog */
     public void clear() {
         // some code goes here
+        tableList.clear();
+        tableCache.clear();
     }
     
     /**

@@ -1,5 +1,8 @@
 package simpledb.storage;
 
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+
 /** Unique identifier for HeapPage objects. */
 public class HeapPageId implements PageId {
 
@@ -10,14 +13,18 @@ public class HeapPageId implements PageId {
      * @param tableId The table that is being referenced
      * @param pgNo The page number in that table.
      */
+    private int tableId;
+    private int pageNumber;
     public HeapPageId(int tableId, int pgNo) {
         // some code goes here
+        this.tableId = tableId;
+        this.pageNumber = pgNo;
     }
 
     /** @return the table associated with this PageId */
     public int getTableId() {
         // some code goes here
-        return 0;
+        return tableId;
     }
 
     /**
@@ -26,7 +33,7 @@ public class HeapPageId implements PageId {
      */
     public int getPageNumber() {
         // some code goes here
-        return 0;
+        return pageNumber;
     }
 
     /**
@@ -37,7 +44,9 @@ public class HeapPageId implements PageId {
      */
     public int hashCode() {
         // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return new HashCodeBuilder(17, 37).append(tableId)
+                                          .append(pageNumber)
+                                          .toHashCode();
     }
 
     /**
@@ -49,7 +58,14 @@ public class HeapPageId implements PageId {
      */
     public boolean equals(Object o) {
         // some code goes here
-        return false;
+        if (o == this)
+            return true;
+        if (o == null || o.getClass() != getClass())
+            return false;
+        HeapPageId obj = (HeapPageId) o;
+        return new EqualsBuilder().append(tableId, obj.getTableId())
+                                  .append(pageNumber, obj.getPageNumber())
+                                  .isEquals();
     }
 
     /**
