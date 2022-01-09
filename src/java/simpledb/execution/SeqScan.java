@@ -110,13 +110,13 @@ public class SeqScan implements OpIterator {
     public TupleDesc getTupleDesc() {
         // some code goes here
         TupleDesc tupleDesc = Database.getCatalog().getTupleDesc(tableId);
-        if (tableAlias != null || !tableAlias.equals("")) {
+        if (tableAlias != null && !tableAlias.equals("")) {
             Map<String, Integer> nameToIdxMap = new HashMap<>();
             List<TDItem> newItems = new ArrayList<>();
             List<TDItem> oldItems = tupleDesc.tdItems();
             for (int i = 0; i < oldItems.size(); i ++) {
                 nameToIdxMap.put(tableAlias + "." + oldItems.get(i).fieldName, i);
-                newItems.add(new TDItem(oldItems.get(i).getFieldType(), tableAlias +"." + oldItems.get(i).getFieldName()));
+                newItems.add(new TDItem(oldItems.get(i).getFieldType(), tableAlias + "." + oldItems.get(i).getFieldName()));
             }
             return new TupleDesc(newItems, nameToIdxMap);
         }
@@ -141,10 +141,15 @@ public class SeqScan implements OpIterator {
         return tuple;
     }
 
+    /**
+     * 这里要判一下空，有可能rewind之后，这个it就是null，所以如果是null，则不进行任何操作
+     */
     public void close() {
         // some code goes here
-        it.close();
-        it = null;
+        if (it != null) {
+            it.close();
+            it = null;
+        }
     }
 
     public void rewind() throws DbException, NoSuchElementException,

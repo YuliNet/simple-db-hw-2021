@@ -5,6 +5,8 @@ import simpledb.common.Type;
 
 import java.io.*;
 
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+
 /**
  * Instance of Field that stores a single integer.
  */

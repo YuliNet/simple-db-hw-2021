@@ -5,12 +5,18 @@ import simpledb.storage.Tuple;
 
 import java.io.Serializable;
 
+import org.apache.commons.lang3.builder.ToStringBuilder;
+
 /**
  * Predicate compares tuples to a specified Field value.
  */
 public class Predicate implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private int field = -1;
+    private Field operand;
+    private Op op;
 
     /** Constants used for return codes in Field.compare */
     public enum Op implements Serializable {
@@ -59,6 +65,9 @@ public class Predicate implements Serializable {
      */
     public Predicate(int field, Op op, Field operand) {
         // some code goes here
+        this.field = field;
+        this.op = op;
+        this.operand = operand;
     }
 
     /**
@@ -67,7 +76,7 @@ public class Predicate implements Serializable {
     public int getField()
     {
         // some code goes here
-        return -1;
+        return field;
     }
 
     /**
@@ -76,7 +85,7 @@ public class Predicate implements Serializable {
     public Op getOp()
     {
         // some code goes here
-        return null;
+        return op;
     }
     
     /**
@@ -85,7 +94,7 @@ public class Predicate implements Serializable {
     public Field getOperand()
     {
         // some code goes here
-        return null;
+        return operand;
     }
     
     /**
@@ -96,11 +105,13 @@ public class Predicate implements Serializable {
      * 
      * @param t
      *            The tuple to compare against
+     * Field 类中已经将 compare 方法定义好了
+     * @see IntField#compare
      * @return true if the comparison is true, false otherwise.
      */
     public boolean filter(Tuple t) {
         // some code goes here
-        return false;
+        return t.getField(field).compare(op, operand);
     }
 
     /**
@@ -109,6 +120,9 @@ public class Predicate implements Serializable {
      */
     public String toString() {
         // some code goes here
-        return "";
+        return new ToStringBuilder(this).append(field)
+                                        .append(operand)
+                                        .append(op)
+                                        .toString();
     }
 }

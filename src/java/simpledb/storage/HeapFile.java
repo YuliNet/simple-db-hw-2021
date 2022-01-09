@@ -100,6 +100,15 @@ public class HeapFile implements DbFile {
     public void writePage(Page page) throws IOException {
         // some code goes here
         // not necessary for lab1
+        int pageNo = page.getId().getPageNumber();
+        if (pageNo > numPages()) {
+            throw new IllegalArgumentException("illegal page number");
+        }
+        int pageSize = BufferPool.getPageSize();
+        RandomAccessFile file = new RandomAccessFile(f, "rw");
+        file.seek(pageNo * pageSize);
+        file.write(page.getPageData());
+        file.close();
     }
 
     /**
@@ -114,16 +123,42 @@ public class HeapFile implements DbFile {
     public List<Page> insertTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
         // some code goes here
-        return null;
         // not necessary for lab1
+        // 如果存在某个页面可以放下一个tuple
+        List<Page> pageList = new ArrayList<>();
+        for (int i = 0; i < numPages(); i ++) {
+            HeapPage p = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(this.getId(), i), Permissions.READ_WRITE);
+            if (p.getNumEmptySlots() == 0) {
+                continue;
+            }
+            p.insertTuple(t);
+            pageList.add(p);
+            return pageList;
+        }
+
+        // 如果表中所有的页面都满了，则创建新的page到file中
+        // 创建成功之后，再次调用getPage方法，会从file的最新位置重新加载一个page进来
+        // 注意这里调用 numPages方法的时候，会重新计算file中数据的大小
+        BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(f, true));
+        byte[] emptyData = HeapPage.createEmptyPageData();
+        bos.write(emptyData);
+        bos.close();
+        HeapPage p = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(this.getId(), this.numPages() - 1), Permissions.READ_WRITE);
+        p.insertTuple(t);
+        pageList.add(p);
+        return pageList;
     }
 
     // see DbFile.java for javadocs
     public ArrayList<Page> deleteTuple(TransactionId tid, Tuple t) throws DbException,
             TransactionAbortedException {
         // some code goes here
-        return null;
         // not necessary for lab1
+        ArrayList<Page> pageList = new ArrayList<>();
+        HeapPage p = (HeapPage) Database.getBufferPool().getPage(tid, t.getRecordId().getPageId(), Permissions.READ_WRITE);
+        p.deleteTuple(t);
+        pageList.add(p);
+        return pageList;
     }
 
     // see DbFile.java for javadocs
@@ -132,7 +167,7 @@ public class HeapFile implements DbFile {
         return new HeapFileInterator(this, tid);
     }
 
-    private static final class HeapFileInterator implements DbFileIterator {
+    public static final class HeapFileInterator implements DbFileIterator {
 
         private HeapFile f;
         private int witchPage;
@@ -145,6 +180,10 @@ public class HeapFile implements DbFile {
             this.it = null;
         }
 
+        public Iterator<Tuple> getIt() {
+            return this.it;
+        }
+
         @Override
         public void close() {
             it = null;
@@ -153,15 +192,15 @@ public class HeapFile implements DbFile {
         @Override
         public boolean hasNext() throws DbException, TransactionAbortedException {
             int numPages = f.numPages();
-            if (witchPage < 0 || witchPage >= numPages)
+            if (witchPage < 0)
                 throw new DbException(String.format("illegal page number, witch is : %d", witchPage));
-            if (it == null) 
+            if (it == null || witchPage >= numPages) 
                 return false;
             if (!it.hasNext()) {
                 if (witchPage + 1 < numPages) {
                     it = getTupleIterator(witchPage + 1);
                     witchPage += 1;
-                    return it.hasNext();
+                    return hasNext();
                 }
                 return false;
             }
@@ -190,7 +229,7 @@ public class HeapFile implements DbFile {
         private Iterator<Tuple> getTupleIterator(int pageNo) throws DbException, TransactionAbortedException {
             if (pageNo < 0 || pageNo >= f.numPages())
                 throw new DbException(String.format("illegal page number, witch is : %d", pageNo));
-            HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(f.getId(), pageNo), Permissions.READ_ONLY);
+            HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(f.getId(), pageNo), Permissions.READ_WRITE);
             return page.iterator();
         }
     }

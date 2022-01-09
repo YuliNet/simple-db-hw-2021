@@ -9,6 +9,7 @@ import simpledb.transaction.TransactionId;
 
 import java.io.*;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.tuple.Pair;
@@ -87,20 +88,21 @@ public class BufferPool {
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
-        if (pid.getPageNumber() > numPages)
-            throw new DbException("pid is over limit size, please check the validate of the pid");
         if (LRUCache.containsKey(pid)) {
             // Page page = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
             // Pair<Page, Permissions> pair = Pair.of(page, perm);
             // LRUCache.put(pid, pair);
             Pair<Page, Permissions> pair = LRUCache.get(pid);
-            // 在这里做权限校验，如果事务权限小于给定page的权限，则抛出异常
-            if (perm.ordinal() < pair.getRight().ordinal())
+            // 在这里做权限校验，如果事务权限大于给定page的权限，则抛出异常
+            if (perm.ordinal() > pair.getRight().ordinal())
                 throw new TransactionAbortedException();
             return pair.getLeft();
         }
         // 实现LRU替换策略，从当前Database下，所有表的目录中，获取表的dbfile，根据pid获取dbfile中的page到LRU缓存中来
         Pair<Page, Permissions> newPair = Pair.of(Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid), perm);
+        if (LRUCache.size() >= numPages) {
+            evictPage();
+        }
         LRUCache.put(pid, newPair);
         return newPair.getLeft();
     }
@@ -167,6 +169,8 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        DbFile file = Database.getCatalog().getDatabaseFile(tableId);
+        updateBufferPool(file.insertTuple(tid, t), tid);
     }
 
     /**
@@ -186,6 +190,8 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        DbFile file = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId());
+        updateBufferPool(file.deleteTuple(tid, t), tid);
     }
 
     /**
@@ -210,15 +216,25 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        LRUCache.remove(pid);
     }
 
     /**
      * Flushes a certain page to disk
+     * 开启 write log ahead 机制, flush之前要写日志
      * @param pid an ID indicating the page to flush
      */
-    private synchronized  void flushPage(PageId pid) throws IOException {
+    private synchronized void flushPage(PageId pid) throws IOException {
         // some code goes here
         // not necessary for lab1
+        Page p = LRUCache.get(pid).getLeft();
+        TransactionId tid = null;
+        if ((tid = p.isDirty()) != null) {
+            Database.getLogFile().logWrite(tid, p.getBeforeImage(), p);
+            Database.getLogFile().force();
+            Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(p);
+            p.markDirty(false, null);
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -232,9 +248,26 @@ public class BufferPool {
      * Discards a page from the buffer pool.
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
-    private synchronized  void evictPage() throws DbException {
+    private synchronized void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
+        Map.Entry<PageId, Pair<Page, Permissions>> entry = LRUCache.entrySet().iterator().next();
+        try {
+            flushPage(entry.getKey());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        discardPage(entry.getKey());
+    }
+
+    private void updateBufferPool(List<Page> pageList, TransactionId tid) throws DbException{
+        for (Page p : pageList) {
+            p.markDirty(true, tid);
+            if (LRUCache.size() >= numPages) {
+                evictPage();
+            }
+            LRUCache.put(p.getId(), Pair.of(p, Permissions.READ_WRITE));
+        }
     }
 
 }

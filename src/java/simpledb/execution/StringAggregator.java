@@ -1,7 +1,15 @@
 package simpledb.execution;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.NoSuchElementException;
+
+import simpledb.common.DbException;
 import simpledb.common.Type;
+import simpledb.storage.Field;
+import simpledb.storage.StringField;
 import simpledb.storage.Tuple;
+import simpledb.transaction.TransactionAbortedException;
 
 /**
  * Knows how to compute some aggregate over a set of StringFields.
@@ -9,6 +17,12 @@ import simpledb.storage.Tuple;
 public class StringAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
+
+    private Map<Field, Integer> groupMap;
+    private int gbFieldIndex;
+    private Type gbFieldType;
+    private int aFieldIndex;
+    private Op what;
 
     /**
      * Aggregate constructor
@@ -21,6 +35,14 @@ public class StringAggregator implements Aggregator {
 
     public StringAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
         // some code goes here
+        this.groupMap = new HashMap<>();
+        this.gbFieldType = gbfieldtype;
+        this.gbFieldIndex = gbfield;
+        this.aFieldIndex = afield;
+        this.what = what;
+        if (this.what != Op.COUNT) {
+            throw new IllegalArgumentException("not support aggregate operate");
+        }
     }
 
     /**
@@ -29,6 +51,10 @@ public class StringAggregator implements Aggregator {
      */
     public void mergeTupleIntoGroup(Tuple tup) {
         // some code goes here
+        Field gbField = (this.gbFieldIndex == NO_GROUPING ? null : tup.getField(this.gbFieldIndex));
+        if (gbField != null && gbField.getType() != this.gbFieldType)
+            throw new IllegalArgumentException("gb field type is not conssistency");
+        groupMap.put(gbField, groupMap.getOrDefault(gbField, 0) + 1);
     }
 
     /**
@@ -41,7 +67,19 @@ public class StringAggregator implements Aggregator {
      */
     public OpIterator iterator() {
         // some code goes here
-        throw new UnsupportedOperationException("please implement me for lab2");
+        return new StringAggregateInterator(groupMap, gbFieldType);
+    }
+
+    private class StringAggregateInterator extends AggregateIterator {
+
+        public StringAggregateInterator(Map<Field, Integer> groupMap, Type gbFieldType) {
+            super(groupMap, gbFieldType);
+        }
+
+        @Override
+        public Tuple next() throws DbException, TransactionAbortedException, NoSuchElementException {
+            return super.next();
+        }
     }
 
 }
