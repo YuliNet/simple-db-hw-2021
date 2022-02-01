@@ -1,11 +1,13 @@
 package simpledb.optimizer;
 
 import simpledb.common.Database;
+import simpledb.common.DbException;
 import simpledb.common.Type;
 import simpledb.execution.Predicate;
 import simpledb.execution.SeqScan;
 import simpledb.storage.*;
-import simpledb.transaction.Transaction;
+import simpledb.transaction.TransactionAbortedException;
+import simpledb.transaction.TransactionId;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -68,6 +70,15 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+    private final int IO_COST_PER_PAGE;
+    private int tableId;
+    private int fieldNum;
+    private int pageNum;
+    private int tupleNum;
+    private DbFile dbFile;
+    private Map<Integer, IntHistogram> intHistogramMap;
+    private Map<Integer, StringHistogram> stringHistogramMap;
+
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
@@ -87,6 +98,89 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+        this.tableId = tableid;
+        this.IO_COST_PER_PAGE = ioCostPerPage;
+        this.intHistogramMap = new HashMap<>();
+        this.stringHistogramMap = new HashMap<>();
+        this.dbFile = Database.getCatalog().getDatabaseFile(tableId);
+        this.pageNum = ((HeapFile) (dbFile)).numPages();
+        TupleDesc td = this.dbFile.getTupleDesc();
+        this.fieldNum = td.numFields();
+        int[] mins = new int[fieldNum];
+        int[] maxs = new int[fieldNum];
+        Type[] types = getTypes(td);
+        TransactionId tid = new TransactionId();
+        SeqScan scan = new SeqScan(tid, tableId, "");
+        try {
+            scan.open();
+            for (int i = 0; i < fieldNum; i ++) {
+                if (types[i] == Type.STRING_TYPE) {
+                    continue;
+                }
+                int min = Integer.MAX_VALUE;
+                int max = Integer.MIN_VALUE;
+                while (scan.hasNext()) {
+                    if (i == 0) {
+                        tupleNum += 1;
+                    }
+                    Tuple tuple = scan.next();
+                    int value = ((IntField) tuple.getField(i)).getValue();
+                    if (value < min) {
+                        min = value;
+                    }
+                    if (value > max) {
+                        max = value;
+                    }
+                }
+                mins[i] = min;
+                maxs[i] = max;
+                scan.rewind();
+            }
+            scan.close();
+        } catch (DbException | TransactionAbortedException e) {
+            e.printStackTrace();
+        }
+
+        for (int i = 0; i < fieldNum; i ++) {
+            if (types[i] == Type.INT_TYPE) {
+                intHistogramMap.put(i, new IntHistogram(NUM_HIST_BINS, mins[i], maxs[i]));
+            } else {
+                stringHistogramMap.put(i, new StringHistogram(NUM_HIST_BINS));
+            }
+        }
+
+        addValueToHist();
+
+    }
+
+    private Type[] getTypes(TupleDesc td) {
+        Type[] types = new Type[td.numFields()];
+        for (int i = 0, n = td.numFields(); i < n; i ++) {
+            types[i] = td.getFieldType(i);
+        }
+        return types;
+    }
+
+    private void addValueToHist() {
+        TransactionId tid = new TransactionId();
+        SeqScan scan = new SeqScan(tid, tableId, "");
+        try {
+            scan.open();
+            while (scan.hasNext()) {
+                Tuple tuple = scan.next();
+                for (int i = 0; i < fieldNum; i ++) {
+                    Field field = tuple.getField(i);
+                    if (field.getType() == Type.INT_TYPE) {
+                        intHistogramMap.get(i).addValue(((IntField) field).getValue());
+                    } else {
+                        stringHistogramMap.get(i).addValue(((StringField) field).getValue());
+                    }
+                }
+            }
+            scan.close();
+        } catch (DbException | TransactionAbortedException e) {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -103,7 +197,7 @@ public class TableStats {
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return IO_COST_PER_PAGE * this.pageNum;
     }
 
     /**
@@ -117,7 +211,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return (int) (selectivityFactor * this.tupleNum);
     }
 
     /**
@@ -150,7 +244,11 @@ public class TableStats {
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
         // some code goes here
-        return 1.0;
+        if (constant.getType() == Type.INT_TYPE) {
+            return intHistogramMap.get(field).estimateSelectivity(op, ((IntField) constant).getValue());
+        } else {
+            return stringHistogramMap.get(field).estimateSelectivity(op, ((StringField) constant).getValue());
+        }
     }
 
     /**
@@ -158,7 +256,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return this.tupleNum;
     }
 
 }

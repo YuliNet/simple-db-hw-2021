@@ -3,7 +3,7 @@ package simpledb.optimizer;
 import simpledb.common.Database;
 import simpledb.ParsingException;
 import simpledb.execution.*;
-import simpledb.storage.TupleDesc;
+import simpledb.execution.Predicate.Op;
 
 import java.util.*;
 
@@ -130,7 +130,7 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            return cost1 + cost2 * card1 + card1 * card2;
         }
     }
 
@@ -176,6 +176,17 @@ public class JoinOptimizer {
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
         // some code goes here
+        if (joinOp == Op.EQUALS) {
+            if (t1pkey) {
+                card = card2;
+            } else if (t2pkey) {
+                card = card1;
+            } else {
+                card = (card1 > card2 ? card1 : card2);
+            }
+        } else {
+            card = (int) (card1 * card2 * 0.3D);
+        }
         return card <= 0 ? 1 : card;
     }
 
@@ -237,8 +248,34 @@ public class JoinOptimizer {
             throws ParsingException {
 
         // some code goes here
-        //Replace the following
-        return joins;
+        PlanCache pc = new PlanCache();
+        Set<Set<LogicalJoinNode>> nodeSets = null;
+        for (int i = 1, n = joins.size(); i <= n; i ++) {
+            nodeSets = enumerateSubsets(joins, i);
+            for (Set<LogicalJoinNode> nodeSet : nodeSets) {
+                double costSoFar = Double.MAX_VALUE;
+                List<LogicalJoinNode> optJoins = null;
+                int optCard = 0;
+                for (LogicalJoinNode j : nodeSet) {
+                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, j, nodeSet, costSoFar, pc);
+                    if (costCard == null) continue;
+                    if (costCard.cost < costSoFar) {
+                        costSoFar = costCard.cost;
+                        optCard = costCard.card;
+                        optJoins = costCard.plan;
+                    }
+                }
+                pc.addPlan(nodeSet, costSoFar, optCard, optJoins);
+            }
+        }
+        List<LogicalJoinNode> res = null;
+        for (Set<LogicalJoinNode> set : nodeSets) {
+            res = pc.getOrder(set);
+        }
+        if (explain) {
+            printJoins(res, pc, stats, filterSelectivities);
+        }
+        return res;
     }
 
     // ===================== Private Methods =================================
