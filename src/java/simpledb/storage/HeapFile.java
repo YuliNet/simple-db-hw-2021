@@ -2,13 +2,11 @@ package simpledb.storage;
 
 import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.Debug;
 import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
-import java.nio.Buffer;
 import java.util.*;
 
 /**
