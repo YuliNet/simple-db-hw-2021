@@ -8,9 +8,13 @@ import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -34,6 +38,100 @@ public class BufferPool {
     private int numPages;
 
     private Map<PageId, Pair<Page, Permissions>> LRUCache;
+
+    public PageLockManager pageLockManager;
+
+
+    public class Lock {
+        public int lockType;
+        public TransactionId tid;
+        public Lock(TransactionId tid, int lockType) {
+            this.lockType = lockType;
+            this.tid = tid;
+        }
+    }
+
+    public class PageLockManager {
+        public Map<PageId, List<Lock>> lockMap;
+        public PageLockManager() {
+            this.lockMap = new ConcurrentHashMap<>();
+        }
+
+        public synchronized boolean acquireLock(PageId pid, TransactionId tid, int lockType) {
+            if (!lockMap.containsKey(pid)) {
+                List<Lock> list = new ArrayList<>();
+                list.add(new Lock(tid, lockType));
+                lockMap.put(pid, list);
+                return true;
+            }
+            List<Lock> pageLockList = lockMap.get(pid);
+            for (Lock lock : pageLockList) {
+                if (lock.tid.equals(tid)) {
+                    // 实现可重入锁
+                    if (lock.lockType == lockType) {
+                        return true;
+                    }
+
+                    if (lock.lockType == 1) {
+                        return true;
+                    }
+
+                    // 实现锁升级
+                    if (pageLockList.size() == 1) {
+                        lock.lockType = 1;
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+            }
+
+            if (pageLockList.get(0).lockType == 1) {
+                assert pageLockList.size() == 1 : "exclusive lock can't coexist with other locks";
+                return false;
+            }
+
+            if (lockType == 0) {
+                Lock sharedLock = new Lock(tid, 0);
+                pageLockList.add(sharedLock);
+                lockMap.put(pid, pageLockList);
+                return true;
+            }
+            return false;
+        }
+
+        public synchronized boolean releaseLock(PageId pid, TransactionId tid) {
+            assert lockMap.get(pid) != null : "no page in lock";
+            List<Lock> pageLockList = lockMap.get(pid);
+            Iterator<Lock> lockIterator = pageLockList.iterator();
+            while (lockIterator.hasNext()) {
+                Lock lock = lockIterator.next();
+                if (tid.equals(lock.tid)) {
+                    lockIterator.remove();
+                    if (pageLockList.size() == 0) {
+                        lockMap.remove(pid);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public synchronized boolean holdsLock(PageId pid, TransactionId tid) {
+            if (!lockMap.containsKey(pid)) {
+                return false;
+            }
+
+            List<Lock> pageLockList = lockMap.get(pid);
+            for (Lock lock : pageLockList) {
+                if (tid.equals(lock.tid)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
     
     /** Default number of pages passed to the constructor. This is used by
     other classes. BufferPool should use the numPages argument to the
@@ -54,6 +152,7 @@ public class BufferPool {
                 return size() > numPages;
             }
         };
+        this.pageLockManager = new PageLockManager();
     }
     
     public static int getPageSize() {
@@ -84,22 +183,37 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the page
      * @param pid the ID of the requested page
      * @param perm the requested permissions on the page
+     * @throws DeadlockException
      */
-    public Page getPage(TransactionId tid, PageId pid, Permissions perm)
+    public synchronized Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
+        int lockType;
+        if (perm == Permissions.READ_ONLY) {
+            lockType = 0;
+        } else {
+            lockType = 1;
+        }
+        boolean lockAcquired = false;
+        long start = System.currentTimeMillis();
+        long timeout = new Random().nextInt(2000) + 1000;
+        while (!lockAcquired) {
+            long now = System.currentTimeMillis();
+            if (now - start > timeout) {
+                throw new TransactionAbortedException();
+            }
+            lockAcquired = pageLockManager.acquireLock(pid, tid, lockType);
+        }
+        Pair<Page, Permissions> newPair = null;
         if (LRUCache.containsKey(pid)) {
             // Page page = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
             // Pair<Page, Permissions> pair = Pair.of(page, perm);
             // LRUCache.put(pid, pair);
             Pair<Page, Permissions> pair = LRUCache.get(pid);
-            // 在这里做权限校验，如果事务权限大于给定page的权限，则抛出异常
-            if (perm.ordinal() > pair.getRight().ordinal())
-                throw new TransactionAbortedException();
             return pair.getLeft();
         }
         // 实现LRU替换策略，从当前Database下，所有表的目录中，获取表的dbfile，根据pid获取dbfile中的page到LRU缓存中来
-        Pair<Page, Permissions> newPair = Pair.of(Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid), perm);
+        newPair = Pair.of(Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid), perm);
         if (LRUCache.size() >= numPages) {
             evictPage();
         }
@@ -119,6 +233,7 @@ public class BufferPool {
     public void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        pageLockManager.releaseLock(pid, tid);
     }
 
     /**
@@ -129,13 +244,14 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid) {
         // some code goes here
         // not necessary for lab1|lab2
+        transactionComplete(tid, true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        return pageLockManager.holdsLock(p, tid);
     }
 
     /**
@@ -148,6 +264,21 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        try {
+            if (commit) {
+                flushPages(tid);
+            } else {
+                restorePages(tid);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            for (PageId pid : LRUCache.keySet()) {
+                if (pageLockManager.holdsLock(pid, tid)) {
+                    unsafeReleasePage(tid, pid);
+                }
+            }
+        }
     }
 
     /**
@@ -202,7 +333,13 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         // some code goes here
         // not necessary for lab1
-
+        List<PageId> tmpList = new ArrayList<>();
+        for (PageId pid : LRUCache.keySet()) {
+            tmpList.add(pid);
+        }
+        for (PageId pid : tmpList) {
+            flushPage(pid);
+        }
     }
 
     /** Remove the specific page id from the buffer pool.
@@ -239,9 +376,23 @@ public class BufferPool {
 
     /** Write all pages of the specified transaction to disk.
      */
-    public synchronized  void flushPages(TransactionId tid) throws IOException {
+    public synchronized void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        Iterator<Map.Entry<PageId, Pair<Page, Permissions>>> iterator = LRUCache.entrySet().iterator();
+        List<PageId> tmpList = new ArrayList<>();
+        while (iterator.hasNext()) {
+            Map.Entry<PageId, Pair<Page, Permissions>> entry = iterator.next();
+            PageId pid = entry.getKey();
+            Page page = entry.getValue().getLeft();
+            if (tid.equals(page.isDirty())) {
+                tmpList.add(pid);
+            }
+        }
+
+        for (PageId pid : tmpList) {
+            flushPage(pid);
+        }
     }
 
     /**
@@ -251,7 +402,19 @@ public class BufferPool {
     private synchronized void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
-        Map.Entry<PageId, Pair<Page, Permissions>> entry = LRUCache.entrySet().iterator().next();
+        Iterator<Map.Entry<PageId, Pair<Page, Permissions>>> iterator = LRUCache.entrySet().iterator();
+        Map.Entry<PageId, Pair<Page, Permissions>> entry = null;
+        while (iterator.hasNext()) {
+            Map.Entry<PageId, Pair<Page, Permissions>> tmp = iterator.next();
+            TransactionId tid = tmp.getValue().getLeft().isDirty();
+            if (tid == null) {
+                entry = tmp;
+                break;
+            }
+        }
+        if (entry == null) {
+            throw new DbException("failed to evict page: all pages are either dirty");
+        }
         try {
             flushPage(entry.getKey());
         } catch (Exception e) {
@@ -263,10 +426,32 @@ public class BufferPool {
     private void updateBufferPool(List<Page> pageList, TransactionId tid) throws DbException{
         for (Page p : pageList) {
             p.markDirty(true, tid);
-            if (LRUCache.size() >= numPages) {
-                evictPage();
+            if (!LRUCache.containsKey(p.getId())) {
+                if (LRUCache.size() >= numPages) {
+                    evictPage();
+                }
             }
             LRUCache.put(p.getId(), Pair.of(p, Permissions.READ_WRITE));
+        }
+    }
+
+    /**
+     * 用于abort某个事物操作过的page，实现2pl
+     * @see BufferPool#transactionComplete(TransactionId, boolean)
+     * @param tid 事务id
+     */
+    private synchronized void restorePages(TransactionId tid) {
+        Iterator<Map.Entry<PageId, Pair<Page, Permissions>>> iterator = LRUCache.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<PageId, Pair<Page, Permissions>> entry = iterator.next();
+            Page oldPage = entry.getValue().getLeft();
+            PageId pid = entry.getKey();
+            if (oldPage.isDirty() != null && oldPage.isDirty().equals(tid)) {
+                int tableId = pid.getTableId();
+                DbFile file = Database.getCatalog().getDatabaseFile(tableId);
+                Page fromDiskPage = file.readPage(pid);
+                LRUCache.put(pid, Pair.of(fromDiskPage, entry.getValue().getRight()));
+            }
         }
     }
 

@@ -127,6 +127,7 @@ public class HeapFile implements DbFile {
         for (int i = 0; i < numPages(); i ++) {
             HeapPage p = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(this.getId(), i), Permissions.READ_WRITE);
             if (p.getNumEmptySlots() == 0) {
+                Database.getBufferPool().unsafeReleasePage(tid, p.pid);
                 continue;
             }
             p.insertTuple(t);
@@ -227,7 +228,7 @@ public class HeapFile implements DbFile {
         private Iterator<Tuple> getTupleIterator(int pageNo) throws DbException, TransactionAbortedException {
             if (pageNo < 0 || pageNo >= f.numPages())
                 throw new DbException(String.format("illegal page number, witch is : %d", pageNo));
-            HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(f.getId(), pageNo), Permissions.READ_WRITE);
+            HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, new HeapPageId(f.getId(), pageNo), Permissions.READ_ONLY);
             return page.iterator();
         }
     }
