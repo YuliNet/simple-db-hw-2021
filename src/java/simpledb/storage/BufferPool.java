@@ -266,7 +266,21 @@ public class BufferPool {
         // not necessary for lab1|lab2
         try {
             if (commit) {
-                flushPages(tid);
+                // flushPages(tid);
+                Iterator<Map.Entry<PageId, Pair<Page, Permissions>>> iterator = LRUCache.entrySet().iterator();
+                List<PageId> tmpList = new ArrayList<>();
+                while (iterator.hasNext()) {
+                    Map.Entry<PageId, Pair<Page, Permissions>> entry = iterator.next();
+                    PageId pid = entry.getKey();
+                    Page page = entry.getValue().getLeft();
+                    page.setBeforeImage();
+                    if (tid.equals(page.isDirty())) {
+                        tmpList.add(pid);
+                    }
+                }
+                for (PageId pid : tmpList) {
+                    flushPage(pid);
+                }
             } else {
                 restorePages(tid);
             }
@@ -385,6 +399,7 @@ public class BufferPool {
             Map.Entry<PageId, Pair<Page, Permissions>> entry = iterator.next();
             PageId pid = entry.getKey();
             Page page = entry.getValue().getLeft();
+            page.setBeforeImage();
             if (tid.equals(page.isDirty())) {
                 tmpList.add(pid);
             }
